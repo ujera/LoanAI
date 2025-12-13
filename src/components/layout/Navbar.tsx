@@ -28,9 +28,6 @@ export function Navbar() {
           <Link href="/about" className="text-sm font-medium text-slate-300 hover:text-white transition-colors">
             Process
           </Link>
-           <Link href="/contact" className="text-sm font-medium text-slate-300 hover:text-white transition-colors">
-            Team
-          </Link>
           <Link href="https://github.com/ujera/LoanAI" target="_blank" rel="noopener noreferrer">
             <Button
               variant="outline"
