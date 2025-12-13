@@ -139,11 +139,58 @@ export async function POST(request: NextRequest) {
 
     await client.query('COMMIT');
 
+    // Send data to AI agent system for processing
+    try {
+      const agentResponse = await fetch('http://localhost:8000/api/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          customerId: customerId,
+          firstName: body.firstName,
+          lastName: body.lastName,
+          personalId: body.personalId,
+          gender: body.gender,
+          birthYear: body.birthYear,
+          phone: body.phone,
+          address: body.address,
+          educationLevel: body.educationLevel,
+          university: body.university || 'Not Specified',
+          employmentStatus: body.employmentStatus,
+          companyName: body.companyName || null,
+          monthlySalary: parseFloat(body.monthlySalary) || 0,
+          experienceYears: parseInt(body.experienceYears) || 0,
+          loanPurpose: body.loanPurpose,
+          loanAmount: parseFloat(body.loanAmount) || 0,
+          loanDuration: parseInt(body.loanDuration) || 0,
+          additionalInfo: body.additionalInfo || null,
+          bankStatementUrl: body.bankStatementUrl || null,
+          bankStatementSize: body.bankStatementSize || null,
+          bankStatementMimeType: body.bankStatementMimeType || null,
+          salaryStatementUrl: body.salaryStatementUrl || null,
+          salaryStatementSize: body.salaryStatementSize || null,
+          salaryStatementMimeType: body.salaryStatementMimeType || null,
+        }),
+      });
+
+      if (!agentResponse.ok) {
+        console.error('AI Agent processing failed:', await agentResponse.text());
+        // Don't fail the whole request if AI processing fails
+      } else {
+        const agentResult = await agentResponse.json();
+        console.log('AI Agent processing started:', agentResult);
+      }
+    } catch (agentError) {
+      console.error('Error sending to AI agent system:', agentError);
+      // Don't fail the whole request if AI agent is unavailable
+    }
+
     return NextResponse.json(
       {
         success: true,
         customerId: customerId,
-        message: 'Loan application submitted successfully'
+        message: 'Loan application submitted successfully and sent for AI processing'
       },
       { status: 201 }
     );

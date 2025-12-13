@@ -18,7 +18,9 @@ export function LoanForm() {
   const [data, setData] = useState<LoanFormData>(INITIAL_DATA);
   const [errors, setErrors] = useState<Partial<Record<keyof LoanFormData, string>>>({});
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const [score, setScore] = useState(0);
+  const [customerId, setCustomerId] = useState("");
+  const [aiDecision, setAiDecision] = useState<any>(null);
+  const [isLoadingDecision, setIsLoadingDecision] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const totalSteps = 5;
@@ -96,34 +98,6 @@ export function LoanForm() {
     setStep((prev) => Math.max(prev - 1, 1));
   };
 
-  const calculateScore = () => {
-    // Mock logic
-    let tempScore = 50; // Base score
-
-    // Salary
-    const salary = parseInt(data.monthlySalary || "0");
-    if (salary > 5000) tempScore += 20;
-    else if (salary > 2000) tempScore += 10;
-
-    // Employment
-    if (data.employmentStatus === "employed") tempScore += 10;
-    else if (data.employmentStatus === "self_employed") tempScore += 5;
-
-    // Education
-    if (["master", "phd"].includes(data.educationLevel)) tempScore += 5;
-
-    // Loan Amount Ratio (simple check)
-    const amount = parseInt(data.loanAmount || "0");
-    if (amount < salary * 12) tempScore += 10;
-    else tempScore -= 10;
-
-    // Cap at 100
-    if (tempScore > 100) tempScore = 98;
-    if (tempScore < 0) tempScore = 15;
-    
-    return tempScore;
-  };
-
   const handleSubmit = async () => {
     if (!validateStep(step)) return;
 
@@ -172,15 +146,91 @@ export function LoanForm() {
       const result = await response.json();
       console.log('Application submitted:', result);
 
-      // Calculate eligibility score
-      const calculatedScore = calculateScore();
-      setScore(calculatedScore);
+      // Store customer ID and show result screen immediately
+      const custId = result.customerId;
+      setCustomerId(custId);
       setIsSubmitted(true);
+      setIsLoadingDecision(true);
+
+      // Poll for AI decision in the background
+      const pollDecision = async () => {
+        try {
+          const maxAttempts = 30; // 30 attempts = 1 minute
+          let attempts = 0;
+
+          const poll = async (): Promise<void> => {
+            if (attempts >= maxAttempts) {
+              console.log('AI processing timeout - showing manual review message');
+              setAiDecision({
+                decision: 'MANUAL_REVIEW',
+                risk_score: 50,
+                confidence_score: 0.5,
+                reasoning: 'AI processing is taking longer than expected. Our team will review your application manually.',
+                conditions: ['Processing timeout - manual review required']
+              });
+              setIsLoadingDecision(false);
+              return;
+            }
+
+            attempts++;
+
+            try {
+              // Check status first
+              const statusRes = await fetch(`http://localhost:8000/api/status/${custId}`);
+              if (statusRes.ok) {
+                const statusData = await statusRes.json();
+                
+                if (statusData.status === 'completed') {
+                  // Fetch the actual decision
+                  const decisionRes = await fetch(`http://localhost:8000/api/result/${custId}`);
+                  if (decisionRes.ok) {
+                    const decision = await decisionRes.json();
+                    setAiDecision(decision);
+                    setIsLoadingDecision(false);
+                    return;
+                  }
+                } else if (statusData.status === 'failed') {
+                  console.error('AI processing failed:', statusData.error);
+                  setAiDecision({
+                    decision: 'MANUAL_REVIEW',
+                    risk_score: 50,
+                    confidence_score: 0.5,
+                    reasoning: 'AI processing encountered an error. Our team will review your application manually.',
+                    conditions: ['AI processing error - manual review required']
+                  });
+                  setIsLoadingDecision(false);
+                  return;
+                }
+              }
+
+              // Continue polling
+              setTimeout(poll, 2000); // Poll every 2 seconds
+            } catch (error) {
+              console.error('Error polling decision:', error);
+              setTimeout(poll, 2000);
+            }
+          };
+
+          await poll();
+        } catch (error) {
+          console.error('Error in polling logic:', error);
+          setAiDecision({
+            decision: 'MANUAL_REVIEW',
+            risk_score: 50,
+            confidence_score: 0.5,
+            reasoning: 'Unable to retrieve AI decision. Our team will review your application manually.',
+            conditions: ['Network error - manual review required']
+          });
+          setIsLoadingDecision(false);
+        }
+      };
+
+      // Start polling
+      pollDecision();
     } catch (error) {
       console.error('Error submitting application:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to submit application. Please try again.';
       alert(`Error: ${errorMessage}\n\nPlease ensure:\n1. Cloud SQL Proxy is running\n2. Backend services are available\n3. All required fields are filled`);
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -189,14 +239,21 @@ export function LoanForm() {
     setData(INITIAL_DATA);
     setStep(1);
     setIsSubmitted(false);
-    setScore(0);
+    setCustomerId("");
+    setAiDecision(null);
+    setIsLoadingDecision(false);
     setErrors({});
   };
 
   if (isSubmitted) {
     return (
       <Card className="w-full max-w-lg mx-auto mt-10">
-        <Result score={score} onReset={handleReset} />
+        <Result 
+          customerId={customerId} 
+          aiDecision={aiDecision} 
+          isLoading={isLoadingDecision}
+          onReset={handleReset} 
+        />
       </Card>
     );
   }
