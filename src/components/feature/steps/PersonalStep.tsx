@@ -53,9 +53,16 @@ export function PersonalStep({ data, onChange, errors }: StepProps) {
           label="Year of Birth"
           type="number"
           value={data.birthYear}
-          onChange={(e) => onChange("birthYear", e.target.value)}
+          onChange={(e) => {
+            const value = e.target.value;
+            // Only allow 4-digit years
+            if (value.length <= 4) {
+              onChange("birthYear", value);
+            }
+          }}
           error={errors.birthYear}
           placeholder="1990"
+          maxLength={4}
         />
       </div>
 

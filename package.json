@@ -6,15 +6,24 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "predev": "node scripts/check-backend.js",
+    "check": "node scripts/check-backend.js",
+    "test:backend": "node scripts/test-backend.js",
+    "db:connect": "psql -h 127.0.0.1 -U loanai_user -d loanai"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.18.0",
+    "@types/pg": "^8.16.0",
     "clsx": "^2.1.1",
+    "dotenv": "^17.2.3",
     "lucide-react": "^0.561.0",
     "next": "16.0.10",
+    "pg": "^8.16.3",
     "react": "19.2.1",
     "react-dom": "19.2.1",
-    "tailwind-merge": "^3.4.0"
+    "tailwind-merge": "^3.4.0",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
