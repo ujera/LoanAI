@@ -44,6 +44,20 @@ export function LoanDetailsStep({ data, onChange, errors }: StepProps) {
           placeholder="10000"
         />
       </div>
+
+      <div className="space-y-2">
+        <label className="text-sm font-medium leading-none text-slate-400">
+          Tell us more about your situation
+        </label>
+        <textarea
+          value={data.additionalInfo || ""}
+          onChange={(e) => onChange("additionalInfo", e.target.value)}
+          placeholder="Please describe your financial situation, loan purpose, and any additional details that might help us assess your application..."
+          rows={5}
+          className="flex w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
+        />
+        <p className="text-xs text-slate-500">Optional: Share any relevant information about your situation</p>
+      </div>
     </div>
   );
 }
