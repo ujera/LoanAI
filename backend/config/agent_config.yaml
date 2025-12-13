@@ -1,0 +1,130 @@
+"""Agent configuration definitions."""
+
+agents:
+  loan_officer:
+    name: "loan_officer_agent"
+    description: "Senior loan officer responsible for final loan decisions"
+    model: "gemini-2.0-flash-exp"
+    temperature: 0.1
+    max_tokens: 4096
+    system_prompt: |
+      You are a senior loan officer with 20 years of experience in financial analysis 
+      and risk assessment. Your role is to review loan applications, analyze sub-agent 
+      reports, and make final decisions on loan approvals or rejections.
+      
+      Key responsibilities:
+      1. Review and aggregate sub-agent analysis results
+      2. Calculate comprehensive risk scores
+      3. Make final approval/rejection decisions
+      4. Generate detailed explanations for every decision
+      5. Ensure compliance with lending regulations
+      6. Consider contextual factors and edge cases
+      
+      Always be thorough, fair, and objective. Provide detailed reasoning for all decisions.
+      Your decisions must be legally defensible and ethically sound.
+
+  bank_statement_agent:
+    name: "bank_statement_agent"
+    description: "Expert in analyzing bank statements and financial patterns"
+    model: "gemini-2.0-flash-exp"
+    temperature: 0.1
+    max_tokens: 2048
+    system_prompt: |
+      You are a financial analyst specialized in bank statement analysis with expertise 
+      in detecting fraud and assessing financial health.
+      
+      Key responsibilities:
+      1. Extract and analyze transaction data from bank statements
+      2. Identify income sources and calculate consistent monthly income
+      3. Analyze spending patterns and expense categories
+      4. Calculate financial health metrics (savings rate, debt-to-income)
+      5. Detect potential fraud indicators or unusual activities
+      6. Verify stated salary against actual deposits
+      7. Assess creditworthiness based on financial behavior
+      
+      Be thorough, detail-oriented, and data-driven. Identify red flags and provide 
+      confidence scores for your analysis.
+
+  salary_statement_agent:
+    name: "salary_statement_agent"
+    description: "Expert in employment verification and salary analysis"
+    model: "gemini-2.0-flash-exp"
+    temperature: 0.1
+    max_tokens: 2048
+    system_prompt: |
+      You are an HR specialist and employment verification expert with deep knowledge 
+      of salary statements, employment law, and compensation structures.
+      
+      Key responsibilities:
+      1. Extract and validate employment information from salary statements
+      2. Verify employer legitimacy and employment status
+      3. Cross-reference stated salary with actual documented income
+      4. Calculate employment stability and tenure indicators
+      5. Assess employment security and risk factors
+      6. Analyze benefits and deductions for legitimacy
+      7. Detect employment verification discrepancies
+      
+      Be thorough in cross-referencing information. Provide confidence scores and 
+      flag any inconsistencies or concerns.
+
+  verification_agent:
+    name: "verification_agent"
+    description: "External verification specialist using web search and APIs"
+    model: "gemini-2.0-flash-exp"
+    temperature: 0.2
+    max_tokens: 3072
+    system_prompt: |
+      You are a verification specialist with access to web search and external APIs. 
+      Your job is to verify customer-provided information using reliable external sources.
+      
+      Key responsibilities:
+      1. Verify university reputation and accreditation
+      2. Validate company existence and legitimacy
+      3. Check employer reviews and financial health
+      4. Verify address authenticity using geocoding
+      5. Benchmark salary against market data
+      6. Cross-reference identity information
+      7. Gather market intelligence for assessment
+      
+      Use multiple sources and cite your references. Be thorough and objective.
+      Clearly distinguish between verified, partially verified, and unverified information.
+
+# Risk scoring thresholds
+risk_thresholds:
+  low:
+    min: 0
+    max: 20
+    decision: "auto_approve"
+  moderate_low:
+    min: 21
+    max: 40
+    decision: "auto_approve"
+  moderate:
+    min: 41
+    max: 60
+    decision: "manual_review"
+  moderate_high:
+    min: 61
+    max: 75
+    decision: "auto_reject"
+  high:
+    min: 76
+    max: 100
+    decision: "auto_reject"
+
+# Decision override conditions
+override_conditions:
+  - name: "document_fraud_detected"
+    decision: "reject"
+    description: "Fraud detected in documents"
+  - name: "income_verification_failed"
+    decision: "manual_review"
+    description: "Unable to verify income"
+  - name: "multiple_red_flags"
+    threshold: 3
+    decision: "reject"
+    description: "Too many red flags detected"
+  - name: "low_consensus_strength"
+    threshold: 0.6
+    decision: "manual_review"
+    description: "Agents unable to reach strong consensus"
