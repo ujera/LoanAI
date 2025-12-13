@@ -47,3 +47,27 @@ config/gcp-credentials.json
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python
+AI_agent/venv/
+AI_agent/__pycache__/
+AI_agent/**/__pycache__/
+AI_agent/**/*.pyc
+AI_agent/**/*.pyo
+AI_agent/**/*.pyd
+AI_agent/.pytest_cache/
+AI_agent/.mypy_cache/
+AI_agent/.ruff_cache/
+
+# Logs
+logs/*.log
+*.log
+nohup.out
+
+# Process tracking
+.loanai_pids
+
+# Cloud SQL Proxy
+config/cloud_sql_proxy
+
+logs
