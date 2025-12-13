@@ -38,7 +38,7 @@ export function LoanForm() {
     let isValid = true;
 
     const requireField = (field: keyof LoanFormData, message = "Required") => {
-      if (!data[field] || data[field].trim() === "") {
+      if (!data[field] || (typeof data[field] === "string" && data[field].trim() === "")) {
         newErrors[field] = message;
         isValid = false;
       }
