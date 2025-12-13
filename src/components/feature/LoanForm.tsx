@@ -23,7 +23,7 @@ export function LoanForm() {
 
   const totalSteps = 5;
 
-  const handleChange = (field: keyof LoanFormData, value: string) => {
+  const handleChange = (field: keyof LoanFormData, value: string | File) => {
     setData((prev) => ({ ...prev, [field]: value }));
     // Clear error when user types
     if (errors[field]) {
@@ -48,6 +48,13 @@ export function LoanForm() {
       requireField("personalId");
       requireField("gender");
       requireField("birthYear");
+      
+      // Validate birth year format
+      if (data.birthYear && (data.birthYear.length !== 4 || isNaN(Number(data.birthYear)))) {
+        newErrors.birthYear = "Please enter a valid 4-digit year";
+        isValid = false;
+      }
+      
       requireField("phone");
       requireField("address");
     } else if (currentStep === 2) {
@@ -121,12 +128,61 @@ export function LoanForm() {
     if (!validateStep(step)) return;
 
     setIsSubmitting(true);
-    // Simulate API call
-    setTimeout(() => {
-      setScore(calculateScore());
+    
+    try {
+      // Submit form data to backend
+      const response = await fetch('/api/loan-application', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          firstName: data.firstName,
+          lastName: data.lastName,
+          personalId: data.personalId,
+          gender: data.gender,
+          birthYear: data.birthYear,
+          phone: data.phone,
+          address: data.address,
+          educationLevel: data.educationLevel,
+          university: data.university,
+          employmentStatus: data.employmentStatus,
+          companyName: data.companyName,
+          monthlySalary: data.monthlySalary,
+          experienceYears: data.experienceYears,
+          loanPurpose: data.loanPurpose,
+          loanDuration: data.loanDuration,
+          loanAmount: data.loanAmount,
+          additionalInfo: data.additionalInfo,
+          bankStatementUrl: data.bankStatementUrl,
+          salaryStatementUrl: data.salaryStatementUrl,
+          bankStatementSize: data.bankStatementSize,
+          salaryStatementSize: data.salaryStatementSize,
+          bankStatementMimeType: data.bankStatementMimeType,
+          salaryStatementMimeType: data.salaryStatementMimeType,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('API Error:', errorData);
+        throw new Error(errorData.error || errorData.details || 'Failed to submit application');
+      }
+
+      const result = await response.json();
+      console.log('Application submitted:', result);
+
+      // Calculate eligibility score
+      const calculatedScore = calculateScore();
+      setScore(calculatedScore);
       setIsSubmitted(true);
+    } catch (error) {
+      console.error('Error submitting application:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to submit application. Please try again.';
+      alert(`Error: ${errorMessage}\n\nPlease ensure:\n1. Cloud SQL Proxy is running\n2. Backend services are available\n3. All required fields are filled`);
+    } finally {
       setIsSubmitting(false);
-    }, 1500);
+    }
   };
 
   const handleReset = () => {

@@ -27,6 +27,14 @@ export interface LoanFormData {
   // Step 5: Documents
   bankStatementName?: string;
   salaryStatementName?: string;
+  bankStatementFile?: File;
+  salaryStatementFile?: File;
+  bankStatementUrl?: string;
+  salaryStatementUrl?: string;
+  bankStatementSize?: number;
+  salaryStatementSize?: number;
+  bankStatementMimeType?: string;
+  salaryStatementMimeType?: string;
 }
 
 export const INITIAL_DATA: LoanFormData = {
