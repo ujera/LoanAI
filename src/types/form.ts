@@ -22,6 +22,7 @@ export interface LoanFormData {
   loanPurpose: string;
   loanDuration: string; // months
   loanAmount: string;
+  additionalInfo?: string;
 
   // Step 5: Documents
   bankStatementName?: string;
@@ -45,6 +46,7 @@ export const INITIAL_DATA: LoanFormData = {
   loanPurpose: "",
   loanDuration: "",
   loanAmount: "",
+  additionalInfo: "",
   bankStatementName: "",
   salaryStatementName: ""
 };
