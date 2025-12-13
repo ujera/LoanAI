@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/Button";
 import { ArrowRight, Code2, Zap, Cpu } from "lucide-react";
 import { Navbar } from "@/components/layout/Navbar";
+import Link from "next/link";
 
 interface LandingPageProps {
   onStart: () => void;
@@ -39,14 +40,15 @@ export function LandingPage({ onStart }: LandingPageProps) {
           <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-100 font-light">
             An experimental prototype exploring how Machine Learning can optimize financial eligibility assessments in real-time. Built in 24 hours.
           </p>
-
-          <div className="flex flex-col sm:flex-row gap-5 justify-center items-center pt-8 animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-200">
+          <div>
             <Button onClick={onStart} variant="primary" className="h-14 px-10 text-lg rounded-full font-mono">
               run_simulation() <ArrowRight className="ml-2 w-5 h-5" />
             </Button>
-            <Button variant="outline" className="h-14 px-10 text-lg rounded-full border-white/10 hover:bg-white/5 font-mono text-slate-400">
-              view_source_code
-            </Button>
+              <Link href="https://github.com/ujera/LoanAI">
+                <Button variant="outline" className="h-14 px-10 text-lg rounded-full border-white/10 hover:bg-white/5 font-mono text-slate-400">
+                  View Source Code
+                </Button>
+              </Link>
           </div>
         </div>
 

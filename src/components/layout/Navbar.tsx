@@ -31,10 +31,16 @@ export function Navbar() {
            <Link href="/contact" className="text-sm font-medium text-slate-300 hover:text-white transition-colors">
             Team
           </Link>
-          <Button variant="outline" className="text-sm gap-2 h-9">
-            <Github className="w-4 h-4" />
-            Repo
-          </Button>
+          <Link href="https://github.com/ujera/LoanAI" target="_blank" rel="noopener noreferrer">
+            <Button
+              variant="outline"
+              className="text-sm gap-2 h-9"
+            >
+              <Github className="w-4 h-4" />
+              Repo
+            </Button>
+          </Link>
+          
       </div>
 
       {/* Mobile Menu Placeholder */}
