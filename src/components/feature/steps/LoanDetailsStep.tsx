@@ -19,6 +19,7 @@ export function LoanDetailsStep({ data, onChange, errors }: StepProps) {
           { label: "Personal", value: "personal" },
           { label: "Education", value: "education" },
           { label: "Business", value: "business" },
+          { label: "Others", value: "others" },
         ]}
         value={data.loanPurpose}
         onChange={(e) => onChange("loanPurpose", e.target.value)}
