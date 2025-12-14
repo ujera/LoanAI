@@ -2,11 +2,19 @@
 
 import json
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 import google.generativeai as genai
+from pydantic import ValidationError
 
 from config.settings import settings
+from loanai_agent.tools.document_templates import (
+    BankStatementData,
+    PromptTemplates,
+    SalaryStatementData,
+)
+from loanai_agent.utils import DocumentProcessingException
 from loanai_agent.utils.gcs_client import get_gcs_client
 from loanai_agent.utils.logger import get_logger
 
@@ -14,18 +22,30 @@ logger = get_logger(__name__)
 
 
 class DocumentProcessor:
-    """Handles document OCR and text extraction."""
+    """Production-ready document processor with template-based prompts and validation."""
 
     def __init__(self):
-        """Initialize document processor."""
+        """Initialize document processor with metrics tracking."""
         self.gcs_client = None
         self.use_document_ai = settings.enable_document_ai
+        self.metrics = {
+            "documents_processed": 0,
+            "documents_failed": 0,
+            "total_processing_time": 0.0,
+            "by_type": {},
+        }
         
         # Configure Gemini API
         if settings.google_api_key:
             genai.configure(api_key=settings.google_api_key)
-            self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
-            logger.info("Gemini model initialized for document analysis")
+            self.model = genai.GenerativeModel(
+                'gemini-2.0-flash-exp',
+                generation_config={
+                    "response_mime_type": "application/json",
+                    "temperature": 0.1,
+                }
+            )
+            logger.info("Gemini model initialized for document analysis with JSON mode")
         else:
             self.model = None
             logger.warning("GOOGLE_API_KEY not set. Document analysis will be limited.")
@@ -38,6 +58,277 @@ class DocumentProcessor:
             except Exception as e:
                 logger.warning(f"Failed to initialize GCS client: {e}. Falling back to simulation mode.")
                 self.use_document_ai = False
+
+    def parse_bank_statement(self, document_path: str, file_content: Optional[bytes] = None) -> Dict[str, Any]:
+        """Parse bank statement with template-based prompts and validation.
+        
+        Args:
+            document_path: GCS path or local path to document
+            file_content: Optional pre-loaded file content as bytes
+            
+        Returns:
+            Structured and validated bank statement data as dictionary
+            
+        Raises:
+            DocumentProcessingException: If parsing or validation fails
+        """
+        start_time = time.time()
+        logger.info(f"Parsing bank statement from {document_path}")
+        
+        try:
+            # Get file content if not provided
+            if file_content is None:
+                file_content = self._load_document_content(document_path)
+            
+            # Use LLM with structured template
+            if not self.model:
+                logger.warning("Gemini model not available, using simulated data")
+                return self._get_simulated_bank_data()
+            
+            # Generate prompt from template
+            schema = BankStatementData.schema_json(indent=2)
+            prompt = PromptTemplates.BANK_STATEMENT.render(schema=schema)
+            
+            # Analyze with LLM
+            result_data = self._analyze_with_llm(
+                file_content=file_content,
+                document_path=document_path,
+                prompt=prompt,
+            )
+            
+            # Validate with Pydantic model
+            validated_data = BankStatementData.parse_obj(result_data)
+            
+            # Record success metrics
+            processing_time = time.time() - start_time
+            self._record_metric("bank_statement", True, processing_time)
+            
+            logger.info(f"Successfully parsed bank statement in {processing_time:.2f}s")
+            return validated_data.dict()
+            
+        except ValidationError as e:
+            processing_time = time.time() - start_time
+            self._record_metric("bank_statement", False, processing_time, "validation_error")
+            logger.error(f"Validation failed for bank statement: {e}")
+            raise DocumentProcessingException(f"Invalid bank statement format: {e}") from e
+        except Exception as e:
+            processing_time = time.time() - start_time
+            self._record_metric("bank_statement", False, processing_time, "processing_error")
+            logger.error(f"Error parsing bank statement: {e}", exc_info=True)
+            raise DocumentProcessingException(f"Failed to parse bank statement: {e}") from e
+
+    def parse_salary_statement(self, document_path: str, file_content: Optional[bytes] = None) -> Dict[str, Any]:
+        """Parse salary statement with template-based prompts and validation.
+        
+        Args:
+            document_path: GCS path or local path to document
+            file_content: Optional pre-loaded file content as bytes
+            
+        Returns:
+            Structured and validated salary statement data as dictionary
+            
+        Raises:
+            DocumentProcessingException: If parsing or validation fails
+        """
+        start_time = time.time()
+        logger.info(f"Parsing salary statement from {document_path}")
+        
+        try:
+            # Get file content if not provided
+            if file_content is None:
+                file_content = self._load_document_content(document_path)
+            
+            # Use LLM with structured template
+            if not self.model:
+                logger.warning("Gemini model not available, using simulated data")
+                return self._get_simulated_salary_data()
+            
+            # Generate prompt from template
+            schema = SalaryStatementData.schema_json(indent=2)
+            prompt = PromptTemplates.SALARY_STATEMENT.render(schema=schema)
+            
+            # Analyze with LLM
+            result_data = self._analyze_with_llm(
+                file_content=file_content,
+                document_path=document_path,
+                prompt=prompt,
+            )
+            
+            # Validate with Pydantic model
+            validated_data = SalaryStatementData.parse_obj(result_data)
+            
+            # Record success metrics
+            processing_time = time.time() - start_time
+            self._record_metric("salary_statement", True, processing_time)
+            
+            logger.info(f"Successfully parsed salary statement in {processing_time:.2f}s")
+            return validated_data.dict()
+            
+        except ValidationError as e:
+            processing_time = time.time() - start_time
+            self._record_metric("salary_statement", False, processing_time, "validation_error")
+            logger.error(f"Validation failed for salary statement: {e}")
+            raise DocumentProcessingException(f"Invalid salary statement format: {e}") from e
+        except Exception as e:
+            processing_time = time.time() - start_time
+            self._record_metric("salary_statement", False, processing_time, "processing_error")
+            logger.error(f"Error parsing salary statement: {e}", exc_info=True)
+            raise DocumentProcessingException(f"Failed to parse salary statement: {e}") from e
+
+    def _load_document_content(self, document_path: str) -> bytes:
+        """Load document content from GCS or local file system.
+        
+        Args:
+            document_path: Path to document
+            
+        Returns:
+            Document content as bytes
+            
+        Raises:
+            DocumentProcessingException: If loading fails
+        """
+        try:
+            if document_path.startswith("gs://"):
+                if not self.gcs_client:
+                    raise DocumentProcessingException("GCS client not available")
+                return self.gcs_client.download_file(document_path)
+            else:
+                if not os.path.exists(document_path):
+                    raise FileNotFoundError(f"File not found: {document_path}")
+                with open(document_path, 'rb') as f:
+                    return f.read()
+        except Exception as e:
+            raise DocumentProcessingException(f"Failed to load document: {e}") from e
+
+    def _analyze_with_llm(
+        self,
+        file_content: bytes,
+        document_path: str,
+        prompt: str,
+    ) -> Dict[str, Any]:
+        """Analyze document using Gemini LLM with structured output.
+        
+        Args:
+            file_content: Document content as bytes
+            document_path: Path to document (for mime type detection)
+            prompt: Prompt template to use
+            
+        Returns:
+            Parsed JSON response as dictionary
+            
+        Raises:
+            DocumentProcessingException: If LLM analysis fails
+        """
+        import tempfile
+        
+        try:
+            # Determine mime type
+            mime_type = self._get_mime_type_from_path(document_path)
+            
+            # Create temporary file for upload
+            with tempfile.NamedTemporaryFile(
+                delete=False, 
+                suffix=os.path.splitext(document_path)[1]
+            ) as tmp:
+                tmp.write(file_content)
+                tmp_path = tmp.name
+            
+            try:
+                # Upload file to Gemini
+                uploaded_file = genai.upload_file(tmp_path, mime_type=mime_type)
+                logger.debug(f"File uploaded to Gemini: {uploaded_file.name}")
+                
+                # Generate content with JSON mode
+                response = self.model.generate_content([prompt, uploaded_file])
+                
+                # Parse JSON response
+                response_text = response.text.strip()
+                
+                # Remove markdown code blocks if present
+                if response_text.startswith("```json"):
+                    response_text = response_text[7:-3]
+                elif response_text.startswith("```"):
+                    response_text = response_text[3:-3]
+                
+                result = json.loads(response_text)
+                logger.debug("Successfully parsed LLM response as JSON")
+                
+                return result
+                
+            finally:
+                # Cleanup temp file
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                    
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response as JSON: {e}")
+            logger.error(f"Response text: {response_text[:500]}")
+            raise DocumentProcessingException("LLM returned invalid JSON") from e
+        except Exception as e:
+            logger.error(f"LLM analysis failed: {e}", exc_info=True)
+            raise DocumentProcessingException(f"LLM analysis failed: {e}") from e
+
+    def _record_metric(
+        self,
+        doc_type: str,
+        success: bool,
+        processing_time: float,
+        error_type: Optional[str] = None,
+    ) -> None:
+        """Record processing metrics for monitoring.
+        
+        Args:
+            doc_type: Type of document processed
+            success: Whether processing succeeded
+            processing_time: Time taken in seconds
+            error_type: Type of error if failed
+        """
+        if success:
+            self.metrics["documents_processed"] += 1
+        else:
+            self.metrics["documents_failed"] += 1
+        
+        self.metrics["total_processing_time"] += processing_time
+        
+        if doc_type not in self.metrics["by_type"]:
+            self.metrics["by_type"][doc_type] = {
+                "processed": 0,
+                "failed": 0,
+                "total_time": 0.0,
+                "errors": {},
+            }
+        
+        type_metrics = self.metrics["by_type"][doc_type]
+        if success:
+            type_metrics["processed"] += 1
+        else:
+            type_metrics["failed"] += 1
+            if error_type:
+                type_metrics["errors"][error_type] = type_metrics["errors"].get(error_type, 0) + 1
+        
+        type_metrics["total_time"] += processing_time
+        
+        logger.debug(f"Metrics recorded: {doc_type}, success={success}, time={processing_time:.2f}s")
+
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get processing metrics for monitoring.
+        
+        Returns:
+            Dictionary of metrics including counts, times, and error rates
+        """
+        total_docs = self.metrics["documents_processed"] + self.metrics["documents_failed"]
+        
+        return {
+            "total_processed": self.metrics["documents_processed"],
+            "total_failed": self.metrics["documents_failed"],
+            "success_rate": (
+                self.metrics["documents_processed"] / total_docs if total_docs > 0 else 0
+            ),
+            "average_processing_time": (
+                self.metrics["total_processing_time"] / total_docs if total_docs > 0 else 0
+            ),
+            "by_type": self.metrics["by_type"],
+        }
 
     def extract_text_from_document(
         self, document_path: str, document_type: str = "pdf"
