@@ -1,8 +1,11 @@
 """Google Cloud Storage client utilities for document retrieval."""
 
 import os
-from typing import Optional, Tuple
+import time
+from functools import wraps
+from typing import Dict, Optional, Tuple
 
+from google.api_core import retry
 from google.cloud import storage
 
 from config.settings import settings
@@ -14,10 +17,17 @@ logger = get_logger(__name__)
 class GCSClient:
     """Client for interacting with Google Cloud Storage."""
 
-    def __init__(self):
-        """Initialize GCS client with credentials from settings."""
+    def __init__(self, cache_ttl: int = 300):
+        """Initialize GCS client with credentials from settings.
+        
+        Args:
+            cache_ttl: Cache time-to-live in seconds (default: 300 = 5 minutes)
+        """
         self._client: Optional[storage.Client] = None
         self._bucket: Optional[storage.Bucket] = None
+        self._file_cache: Dict[str, Tuple[bytes, float]] = {}  # url -> (content, timestamp)
+        self.cache_ttl = cache_ttl
+        self.max_retries = 3
 
     def _get_client(self) -> storage.Client:
         """Get or create storage client."""
@@ -90,20 +100,40 @@ class GCSClient:
         
         return bucket_name, blob_path
 
-    def download_file(self, gs_url: str) -> bytes:
+    @retry.Retry(
+        predicate=retry.if_transient_error,
+        initial=1.0,
+        maximum=10.0,
+        multiplier=2.0,
+        deadline=60.0,
+    )
+    def download_file(self, gs_url: str, use_cache: bool = True) -> bytes:
         """
-        Download file from GCS.
+        Download file from GCS with retry logic and caching.
         
         Args:
             gs_url: GCS URL in format gs://bucket-name/path/to/file
+            use_cache: Whether to use cached files (default: True)
             
         Returns:
             File content as bytes
             
         Raises:
             ValueError: If URL format is invalid
-            Exception: If download fails
+            FileNotFoundError: If file doesn't exist in GCS
+            Exception: If download fails after retries
         """
+        # Check cache first
+        if use_cache and gs_url in self._file_cache:
+            content, timestamp = self._file_cache[gs_url]
+            if time.time() - timestamp < self.cache_ttl:
+                logger.debug(f"Cache hit for {gs_url}")
+                return content
+            else:
+                # Cache expired, remove it
+                logger.debug(f"Cache expired for {gs_url}")
+                del self._file_cache[gs_url]
+        
         try:
             # Parse the GCS URL
             bucket_name, blob_path = self.parse_gs_url(gs_url)
@@ -129,10 +159,19 @@ class GCSClient:
             content = blob.download_as_bytes()
             logger.info(f"Successfully downloaded {len(content)} bytes from {gs_url}")
             
+            # Cache the result
+            if use_cache:
+                self._file_cache[gs_url] = (content, time.time())
+                logger.debug(f"Cached file: {gs_url}")
+            
             return content
             
+        except FileNotFoundError:
+            # Don't retry for file not found
+            logger.error(f"File not found in GCS: {gs_url}")
+            raise
         except Exception as e:
-            logger.error(f"Failed to download file from GCS {gs_url}: {e}")
+            logger.error(f"Failed to download file from GCS {gs_url}: {e}", exc_info=True)
             raise
 
     def download_to_file(self, gs_url: str, destination_path: str) -> str:
@@ -200,6 +239,34 @@ class GCSClient:
         except Exception as e:
             logger.error(f"Error checking file existence for {gs_url}: {e}")
             return False
+
+
+    def clear_cache(self, gs_url: Optional[str] = None) -> None:
+        """Clear file cache.
+        
+        Args:
+            gs_url: Specific URL to clear, or None to clear all
+        """
+        if gs_url:
+            if gs_url in self._file_cache:
+                del self._file_cache[gs_url]
+                logger.debug(f"Cleared cache for {gs_url}")
+        else:
+            self._file_cache.clear()
+            logger.debug("Cleared all cache")
+    
+    def get_cache_stats(self) -> Dict[str, int]:
+        """Get cache statistics.
+        
+        Returns:
+            Dictionary with cache size and item count
+        """
+        total_size = sum(len(content) for content, _ in self._file_cache.values())
+        return {
+            "cached_files": len(self._file_cache),
+            "total_size_bytes": total_size,
+            "cache_ttl_seconds": self.cache_ttl,
+        }
 
 
 # Global GCS client instance
