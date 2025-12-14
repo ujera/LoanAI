@@ -4,12 +4,12 @@ import { useState, useEffect } from "react";
 import { Navbar } from "@/components/layout/Navbar";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { 
-  FileText, 
-  Clock, 
-  CheckCircle, 
-  XCircle, 
-  AlertCircle, 
+import {
+  FileText,
+  Clock,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
   RefreshCw,
   Eye,
   TrendingUp,
@@ -127,7 +127,8 @@ export default function AdminPage() {
       if (response.ok) {
         const data = await response.json();
         setSelectedApp(data.application);
-        fetchAIDecision(customerId);
+        // Don't automatically fetch AI decision - user must click button
+        setAiDecision(null); // Reset AI decision when selecting new app
       }
     } catch (error) {
       console.error('Error fetching application details:', error);
@@ -144,10 +145,10 @@ export default function AdminPage() {
         if (statusData.status === 'completed' && statusData.result) {
           setAiDecision({
             decision: statusData.result.decision,
-            confidence_score: statusData.result.confidenceScore,
-            risk_score: statusData.result.riskScore,
-            loan_amount: statusData.result.approvedAmount,
-            interest_rate: statusData.result.interestRate,
+            confidence_score: statusData.result.confidenceScore ?? statusData.result.confidence_score,
+            risk_score: statusData.result.riskScore ?? statusData.result.risk_score,
+            loan_amount: statusData.result.approvedAmount ?? statusData.result.loan_amount,
+            interest_rate: statusData.result.interestRate ?? statusData.result.interest_rate,
             conditions: statusData.result.conditions || [],
             reasoning: statusData.result.reasoning
           });
@@ -214,7 +215,7 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-[#030712] text-slate-200">
       <Navbar />
-      
+
       <main className="max-w-7xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
@@ -277,7 +278,7 @@ export default function AdminPage() {
           <div className="lg:col-span-2">
             <Card>
               <h2 className="text-xl font-bold text-white mb-4">Loan Applications</h2>
-              
+
               {isLoading ? (
                 <div className="text-center py-8 text-slate-400">Loading applications...</div>
               ) : applications.length === 0 ? (
@@ -287,11 +288,10 @@ export default function AdminPage() {
                   {applications.map((app) => (
                     <div
                       key={app.customer_id}
-                      className={`p-4 rounded-lg border cursor-pointer transition-all hover:bg-white/5 ${
-                        selectedApp?.customer_id === app.customer_id 
-                          ? 'bg-indigo-500/10 border-indigo-500/50' 
-                          : 'bg-white/5 border-white/10'
-                      }`}
+                      className={`p-4 rounded-lg border cursor-pointer transition-all hover:bg-white/5 ${selectedApp?.customer_id === app.customer_id
+                        ? 'bg-indigo-500/10 border-indigo-500/50'
+                        : 'bg-white/5 border-white/10'
+                        }`}
                       onClick={() => fetchApplicationDetails(app.customer_id)}
                     >
                       <div className="flex items-start justify-between mb-2">
@@ -347,8 +347,8 @@ export default function AdminPage() {
               <Card className="sticky top-4">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-bold text-white">Application Details</h2>
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="sm"
                     onClick={() => setSelectedApp(null)}
                   >
@@ -436,7 +436,19 @@ export default function AdminPage() {
 
                   {/* AI Decision */}
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-300 mb-2">AI Decision</h3>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-semibold text-slate-300">AI Decision</h3>
+                      {!aiDecision && !isLoadingDecision && (
+                        <Button
+                          onClick={() => fetchAIDecision(selectedApp.customer_id)}
+                          size="sm"
+                          variant="outline"
+                          className="text-xs"
+                        >
+                          Load AI Review
+                        </Button>
+                      )}
+                    </div>
                     {isLoadingDecision ? (
                       <div className="text-sm text-slate-400">Loading decision...</div>
                     ) : aiDecision ? (
@@ -485,7 +497,7 @@ export default function AdminPage() {
                         )}
                       </div>
                     ) : (
-                      <div className="text-sm text-slate-400">No AI decision available</div>
+                      <div className="text-sm text-slate-400">Click "Load AI Review" to see the AI analysis</div>
                     )}
                   </div>
                 </div>
