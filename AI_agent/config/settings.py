@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     gcp_project_id: str = "your-project-id"
     google_api_key: str = ""
     google_adk_model: str = "gemini-2.0-flash-exp"
+    google_application_credentials: str = "./config/gcp-credentials.json"
+    gcs_bucket_name: str = "loanai-customer-documents-dev"
 
     # ADK Configuration
     adk_temperature: float = 0.1
