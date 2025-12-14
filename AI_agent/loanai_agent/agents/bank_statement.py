@@ -175,9 +175,10 @@ class BankStatementAgent(AnalysisAgent):
             if t.get("type") == "debit"
         )
 
-        avg_balance = (
-            bank_data.get("opening_balance", 0) + bank_data.get("closing_balance", 0)
-        ) / 2
+        # Handle None values for balances
+        opening_balance = bank_data.get("opening_balance") or 0
+        closing_balance = bank_data.get("closing_balance") or 0
+        avg_balance = (opening_balance + closing_balance) / 2
 
         # Analyze income consistency
         income_consistency_score = self.financial_analyzer.calculate_income_consistency(

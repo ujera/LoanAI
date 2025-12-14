@@ -1,10 +1,15 @@
 """Verification and web search tools."""
 
+import requests
 from typing import Any, Dict, List
-
+import time
 from loanai_agent.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Cache to avoid repeated API calls
+_verification_cache = {}
+_cache_expiry = 3600  # 1 hour
 
 
 class WebVerificationTools:
@@ -12,91 +17,232 @@ class WebVerificationTools:
 
     @staticmethod
     def verify_university(university_name: str) -> Dict[str, Any]:
-        """Verify university using web search."""
+        """Verify university using web search and APIs."""
         logger.info(f"Verifying university: {university_name}")
-
-        # Simulated verification
-        verified_universities = {
-            "stanford": {
-                "name": "Stanford University",
-                "country": "USA",
-                "ranking": 2,
-                "accredited": True,
-                "legitimacy": "verified",
-            },
-            "harvard": {
-                "name": "Harvard University",
-                "country": "USA",
-                "ranking": 1,
-                "accredited": True,
-                "legitimacy": "verified",
-            },
-            "berkeley": {
-                "name": "UC Berkeley",
-                "country": "USA",
-                "ranking": 5,
-                "accredited": True,
-                "legitimacy": "verified",
-            },
-        }
-
-        search_key = university_name.lower().split()[0]
-        if search_key in verified_universities:
-            return verified_universities[search_key]
-
-        return {
-            "name": university_name,
-            "country": "Unknown",
-            "ranking": None,
-            "accredited": None,
-            "legitimacy": "unverified",
-        }
+        
+        # Check cache first
+        cache_key = f"university_{university_name.lower()}"
+        if cache_key in _verification_cache:
+            cached_data, timestamp = _verification_cache[cache_key]
+            if time.time() - timestamp < _cache_expiry:
+                logger.info(f"Using cached data for university: {university_name}")
+                return cached_data
+        
+        try:
+            # Use Wikipedia API to verify university
+            wiki_url = "https://en.wikipedia.org/w/api.php"
+            headers = {
+                "User-Agent": "LoanAI-Bot/1.0 (Loan Application Verification System; +https://github.com/ujera/LoanAI)"
+            }
+            params = {
+                "action": "query",
+                "format": "json",
+                "list": "search",
+                "srsearch": f"{university_name} university",
+                "utf8": 1,
+                "srlimit": 3
+            }
+            
+            response = requests.get(wiki_url, params=params, headers=headers, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            
+            search_results = data.get("query", {}).get("search", [])
+            
+            if search_results:
+                # University found on Wikipedia - likely legitimate
+                result = {
+                    "name": university_name,
+                    "country": "Unknown",  # Would need additional parsing
+                    "ranking": None,
+                    "accredited": True,
+                    "legitimacy": "verified",
+                    "source": "wikipedia",
+                    "confidence": 0.85,
+                    "info": search_results[0].get("snippet", "")
+                }
+                
+                # Try to get more details from the first result
+                page_title = search_results[0].get("title")
+                detail_params = {
+                    "action": "query",
+                    "format": "json",
+                    "prop": "extracts|pageimages",
+                    "exintro": 1,
+                    "explaintext": 1,
+                    "titles": page_title,
+                    "piprop": "thumbnail"
+                }
+                
+                detail_response = requests.get(wiki_url, params=detail_params, headers=headers, timeout=5)
+                detail_data = detail_response.json()
+                pages = detail_data.get("query", {}).get("pages", {})
+                
+                if pages:
+                    page = next(iter(pages.values()))
+                    extract = page.get("extract", "")
+                    
+                    # Try to extract country from text
+                    if "Georgia" in extract:
+                        result["country"] = "Georgia"
+                    elif "United States" in extract or "U.S." in extract:
+                        result["country"] = "USA"
+                    elif "United Kingdom" in extract or "UK" in extract:
+                        result["country"] = "UK"
+                    
+                    result["description"] = extract[:200] + "..." if len(extract) > 200 else extract
+                
+                # Cache the result
+                _verification_cache[cache_key] = (result, time.time())
+                return result
+            else:
+                # Not found on Wikipedia - could still be legitimate but less confidence
+                logger.warning(f"University not found on Wikipedia: {university_name}")
+                result = {
+                    "name": university_name,
+                    "country": "Unknown",
+                    "ranking": None,
+                    "accredited": None,
+                    "legitimacy": "unverified",
+                    "source": "none",
+                    "confidence": 0.3,
+                    "warning": "Could not verify university through web sources"
+                }
+                _verification_cache[cache_key] = (result, time.time())
+                return result
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error verifying university {university_name}: {e}")
+            # Fallback to neutral response on API failure
+            return {
+                "name": university_name,
+                "country": "Unknown",
+                "ranking": None,
+                "accredited": None,
+                "legitimacy": "unverified",
+                "source": "api_error",
+                "confidence": 0.5,
+                "error": str(e)
+            }
 
     @staticmethod
     def verify_company(company_name: str) -> Dict[str, Any]:
-        """Verify company legitimacy."""
+        """Verify company legitimacy using web APIs."""
         logger.info(f"Verifying company: {company_name}")
-
-        # Simulated verification
-        verified_companies = {
-            "google": {
-                "name": "Google LLC",
-                "industry": "Technology",
-                "employees": "200,000+",
-                "founded": 1998,
-                "legitimacy": "verified",
-                "rating": 4.5,
-            },
-            "apple": {
-                "name": "Apple Inc.",
-                "industry": "Technology",
-                "employees": "160,000+",
-                "founded": 1976,
-                "legitimacy": "verified",
-                "rating": 4.3,
-            },
-            "microsoft": {
-                "name": "Microsoft Corporation",
-                "industry": "Technology",
-                "employees": "220,000+",
-                "founded": 1975,
-                "legitimacy": "verified",
-                "rating": 4.2,
-            },
-        }
-
-        search_key = company_name.lower().split()[0]
-        if search_key in verified_companies:
-            return verified_companies[search_key]
-
-        return {
-            "name": company_name,
-            "industry": "Unknown",
-            "employees": "Unknown",
-            "founded": None,
-            "legitimacy": "unverified",
-            "rating": None,
-        }
+        
+        # Check cache first
+        cache_key = f"company_{company_name.lower()}"
+        if cache_key in _verification_cache:
+            cached_data, timestamp = _verification_cache[cache_key]
+            if time.time() - timestamp < _cache_expiry:
+                logger.info(f"Using cached data for company: {company_name}")
+                return cached_data
+        
+        try:
+            # Use Wikipedia API to verify company
+            wiki_url = "https://en.wikipedia.org/w/api.php"
+            headers = {
+                "User-Agent": "LoanAI-Bot/1.0 (Loan Application Verification System; +https://github.com/ujera/LoanAI)"
+            }
+            params = {
+                "action": "query",
+                "format": "json",
+                "list": "search",
+                "srsearch": f"{company_name} company",
+                "utf8": 1,
+                "srlimit": 3
+            }
+            
+            response = requests.get(wiki_url, params=params, headers=headers, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            
+            search_results = data.get("query", {}).get("search", [])
+            
+            if search_results:
+                # Company found on Wikipedia - likely legitimate
+                result = {
+                    "name": company_name,
+                    "industry": "Unknown",
+                    "employees": "Unknown",
+                    "founded": None,
+                    "legitimacy": "verified",
+                    "rating": 4.0,
+                    "source": "wikipedia",
+                    "confidence": 0.85,
+                    "info": search_results[0].get("snippet", "")
+                }
+                
+                # Try to get more details
+                page_title = search_results[0].get("title")
+                detail_params = {
+                    "action": "query",
+                    "format": "json",
+                    "prop": "extracts",
+                    "exintro": 1,
+                    "explaintext": 1,
+                    "titles": page_title
+                }
+                
+                detail_response = requests.get(wiki_url, params=detail_params, headers=headers, timeout=5)
+                detail_data = detail_response.json()
+                pages = detail_data.get("query", {}).get("pages", {})
+                
+                if pages:
+                    page = next(iter(pages.values()))
+                    extract = page.get("extract", "")
+                    
+                    # Try to extract industry from text
+                    industries = {
+                        "technology": ["software", "technology", "tech", "computing", "digital"],
+                        "banking": ["bank", "financial services", "finance"],
+                        "telecommunications": ["telecom", "mobile", "wireless", "communications"],
+                        "retail": ["retail", "shopping", "e-commerce", "store"],
+                        "healthcare": ["healthcare", "medical", "pharmaceutical", "health"]
+                    }
+                    
+                    extract_lower = extract.lower()
+                    for industry, keywords in industries.items():
+                        if any(keyword in extract_lower for keyword in keywords):
+                            result["industry"] = industry.capitalize()
+                            break
+                    
+                    result["description"] = extract[:200] + "..." if len(extract) > 200 else extract
+                
+                # Cache the result
+                _verification_cache[cache_key] = (result, time.time())
+                return result
+            else:
+                # Not found - could be small/local company
+                logger.warning(f"Company not found on Wikipedia: {company_name}")
+                result = {
+                    "name": company_name,
+                    "industry": "Unknown",
+                    "employees": "Unknown",
+                    "founded": None,
+                    "legitimacy": "unverified",
+                    "rating": 3.0,
+                    "source": "none",
+                    "confidence": 0.3,
+                    "warning": "Could not verify company through web sources - may be small/local business"
+                }
+                _verification_cache[cache_key] = (result, time.time())
+                return result
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error verifying company {company_name}: {e}")
+            # Fallback to neutral response on API failure
+            return {
+                "name": company_name,
+                "industry": "Unknown",
+                "employees": "Unknown",
+                "founded": None,
+                "legitimacy": "unverified",
+                "rating": 3.0,
+                "source": "api_error",
+                "confidence": 0.5,
+                "error": str(e)
+            }
 
     @staticmethod
     def benchmark_salary(
@@ -144,21 +290,89 @@ class WebVerificationTools:
 
     @staticmethod
     def verify_address(address: str) -> Dict[str, Any]:
-        """Verify address using geocoding."""
+        """Verify address using geocoding API."""
         logger.info(f"Verifying address: {address}")
-
-        # Simulated geocoding
-        return {
-            "address": address,
-            "valid": True,
-            "geocoded": True,
-            "latitude": 37.7749,
-            "longitude": -122.4194,
-            "country": "USA",
-            "state": "CA",
-            "city": "San Francisco",
-            "zip_code": "94102",
-        }
+        
+        # Check cache first
+        cache_key = f"address_{address.lower()}"
+        if cache_key in _verification_cache:
+            cached_data, timestamp = _verification_cache[cache_key]
+            if time.time() - timestamp < _cache_expiry:
+                logger.info(f"Using cached data for address: {address}")
+                return cached_data
+        
+        try:
+            # Use Nominatim (OpenStreetMap) API for geocoding
+            geocode_url = "https://nominatim.openstreetmap.org/search"
+            headers = {
+                "User-Agent": "LoanAI/1.0 (Loan Application Verification)"
+            }
+            params = {
+                "q": address,
+                "format": "json",
+                "limit": 1,
+                "addressdetails": 1
+            }
+            
+            response = requests.get(geocode_url, params=params, headers=headers, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data and len(data) > 0:
+                location = data[0]
+                address_details = location.get("address", {})
+                
+                result = {
+                    "address": address,
+                    "valid": True,
+                    "geocoded": True,
+                    "latitude": float(location.get("lat", 0)),
+                    "longitude": float(location.get("lon", 0)),
+                    "country": address_details.get("country", "Unknown"),
+                    "state": address_details.get("state", "Unknown"),
+                    "city": address_details.get("city") or address_details.get("town") or address_details.get("village", "Unknown"),
+                    "zip_code": address_details.get("postcode", "Unknown"),
+                    "confidence": float(location.get("importance", 0.5)),
+                    "display_name": location.get("display_name", "")
+                }
+                
+                # Cache the result
+                _verification_cache[cache_key] = (result, time.time())
+                return result
+            else:
+                logger.warning(f"Address not found: {address}")
+                result = {
+                    "address": address,
+                    "valid": False,
+                    "geocoded": False,
+                    "latitude": None,
+                    "longitude": None,
+                    "country": "Unknown",
+                    "state": "Unknown",
+                    "city": "Unknown",
+                    "zip_code": "Unknown",
+                    "confidence": 0.0,
+                    "warning": "Could not geocode address"
+                }
+                _verification_cache[cache_key] = (result, time.time())
+                return result
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error verifying address {address}: {e}")
+            # Fallback to neutral response on API failure
+            return {
+                "address": address,
+                "valid": None,
+                "geocoded": False,
+                "latitude": None,
+                "longitude": None,
+                "country": "Unknown",
+                "state": "Unknown",
+                "city": "Unknown",
+                "zip_code": "Unknown",
+                "confidence": 0.5,
+                "error": str(e)
+            }
 
     @staticmethod
     def search_identity_info(

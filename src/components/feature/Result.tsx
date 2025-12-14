@@ -44,7 +44,11 @@ export function Result({ customerId, aiDecision, isLoading, onReset }: ResultPro
   const isReview = aiDecision.decision === "MANUAL_REVIEW";
   
   // Calculate display score (inverse of risk for visual appeal)
-  const displayScore = Math.max(10, 100 - aiDecision.risk_score);
+  // Ensure we have valid numbers to prevent NaN
+  const riskScore = typeof aiDecision.risk_score === 'number' && !isNaN(aiDecision.risk_score) 
+    ? aiDecision.risk_score 
+    : 50;
+  const displayScore = Math.max(10, Math.min(100, 100 - riskScore));
   
   return (
     <div className="flex flex-col items-center justify-center space-y-6 animate-in zoom-in duration-500">
@@ -204,7 +208,7 @@ export function Result({ customerId, aiDecision, isLoading, onReset }: ResultPro
         <p className="text-xs text-slate-600 dark:text-slate-400">
           Your application was analyzed by our Bank Statement, Salary Verification, and External Verification agents.
           <span className="block mt-1 font-medium">
-            Confidence: {Math.round(aiDecision.confidence_score * 100)}% | Risk Level: {aiDecision.risk_score}/100
+            Confidence: {Math.round((aiDecision.confidence_score || 0) * 100)}% | Risk Level: {riskScore}/100
           </span>
         </p>
       </div>

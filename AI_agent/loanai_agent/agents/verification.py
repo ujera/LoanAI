@@ -96,16 +96,20 @@ class VerificationAgent(AnalysisAgent):
         verification_scores = []
 
         # University verification
-        university_verified = university_result.get("legitimacy") == "verified"
-        if university_verified:
+        university_legitimacy = university_result.get("legitimacy")
+        if university_legitimacy == "verified":
             verification_scores.append(1.0)
+        elif university_legitimacy == "assumed_legitimate":
+            verification_scores.append(0.9)  # High trust for assumed legitimate
         else:
             verification_scores.append(0.6)
 
         # Company verification
-        company_verified = company_result.get("legitimacy") == "verified"
-        if company_verified:
+        company_legitimacy = company_result.get("legitimacy")
+        if company_legitimacy == "verified":
             verification_scores.append(1.0)
+        elif company_legitimacy == "assumed_legitimate":
+            verification_scores.append(0.9)  # High trust for assumed legitimate
         else:
             verification_scores.append(0.6)
 
@@ -134,6 +138,10 @@ class VerificationAgent(AnalysisAgent):
         if red_flags:
             risk_score = min(100, risk_score + 15)
             avg_confidence *= 0.8
+
+        # Define verification status variables
+        university_verified = university_legitimacy == "verified"
+        company_verified = company_legitimacy == "verified"
 
         recommendation = self._determine_recommendation(
             avg_confidence, red_flags, university_verified, company_verified
@@ -193,12 +201,14 @@ class VerificationAgent(AnalysisAgent):
         """Detect red flags from verification results."""
         red_flags = []
 
-        # University red flags
-        if university_result.get("legitimacy") != "verified":
+        # University red flags - only flag if explicitly unverified, not assumed_legitimate
+        university_legitimacy = university_result.get("legitimacy")
+        if university_legitimacy not in ["verified", "assumed_legitimate"]:
             red_flags.append("University could not be verified")
 
-        # Company red flags
-        if company_result.get("legitimacy") != "verified":
+        # Company red flags - only flag if explicitly unverified, not assumed_legitimate
+        company_legitimacy = company_result.get("legitimacy")
+        if company_legitimacy not in ["verified", "assumed_legitimate"]:
             red_flags.append("Company could not be verified")
 
         # Address red flags

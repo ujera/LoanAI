@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     gcs_bucket_name: str = "loanai-customer-documents-dev"
 
     # ADK Configuration
+    adk_model: str = "gemini-2.0-flash-exp"
     adk_temperature: float = 0.1
     adk_max_tokens: int = 4096
     adk_top_p: float = 0.9
@@ -39,8 +40,13 @@ class Settings(BaseSettings):
     consensus_threshold: float = 0.6
     timeout_seconds: int = 300
 
-    # Database (for future use)
+    # Database
     database_url: Optional[str] = None
+    db_host: Optional[str] = None
+    db_port: Optional[int] = None
+    db_user: Optional[str] = None
+    db_password: Optional[str] = None
+    db_name: Optional[str] = None
 
     class Config:
         """Pydantic config."""
