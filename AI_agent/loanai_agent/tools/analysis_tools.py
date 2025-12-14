@@ -9,11 +9,21 @@ import google.generativeai as genai
 from pydantic import ValidationError
 
 from config.settings import settings
-from loanai_agent.tools.document_templates import (
-    BankStatementData,
-    PromptTemplates,
-    SalaryStatementData,
-)
+
+# Try to import templates, but make them optional
+try:
+    from loanai_agent.tools.document_templates import (
+        BankStatementData,
+        PromptTemplates,
+        SalaryStatementData,
+    )
+    TEMPLATES_AVAILABLE = True
+except ImportError:
+    TEMPLATES_AVAILABLE = False
+    BankStatementData = None
+    SalaryStatementData = None
+    PromptTemplates = None
+
 from loanai_agent.utils import DocumentProcessingException
 from loanai_agent.utils.gcs_client import get_gcs_client
 from loanai_agent.utils.logger import get_logger
@@ -35,17 +45,30 @@ class DocumentProcessor:
             "by_type": {},
         }
         
+        # Check if templates are available
+        if not TEMPLATES_AVAILABLE:
+            logger.warning(
+                "Jinja2 templates not available. Install jinja2 for enhanced document processing. "
+                "Falling back to legacy processing."
+            )
+        
         # Configure Gemini API
         if settings.google_api_key:
             genai.configure(api_key=settings.google_api_key)
-            self.model = genai.GenerativeModel(
-                'gemini-2.0-flash-exp',
-                generation_config={
-                    "response_mime_type": "application/json",
-                    "temperature": 0.1,
-                }
-            )
-            logger.info("Gemini model initialized for document analysis with JSON mode")
+            
+            # Use JSON mode only if templates are available
+            if TEMPLATES_AVAILABLE:
+                self.model = genai.GenerativeModel(
+                    'gemini-2.0-flash-exp',
+                    generation_config={
+                        "response_mime_type": "application/json",
+                        "temperature": 0.1,
+                    }
+                )
+                logger.info("Gemini model initialized for document analysis with JSON mode")
+            else:
+                self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                logger.info("Gemini model initialized for document analysis")
         else:
             self.model = None
             logger.warning("GOOGLE_API_KEY not set. Document analysis will be limited.")
@@ -85,26 +108,33 @@ class DocumentProcessor:
                 logger.warning("Gemini model not available, using simulated data")
                 return self._get_simulated_bank_data()
             
-            # Generate prompt from template
-            schema = BankStatementData.schema_json(indent=2)
-            prompt = PromptTemplates.BANK_STATEMENT.render(schema=schema)
-            
-            # Analyze with LLM
-            result_data = self._analyze_with_llm(
-                file_content=file_content,
-                document_path=document_path,
-                prompt=prompt,
-            )
-            
-            # Validate with Pydantic model
-            validated_data = BankStatementData.parse_obj(result_data)
+            # Check if templates are available
+            if TEMPLATES_AVAILABLE and BankStatementData and PromptTemplates:
+                # Generate prompt from template
+                schema = BankStatementData.schema_json(indent=2)
+                prompt = PromptTemplates.BANK_STATEMENT.render(schema=schema)
+                
+                # Analyze with LLM
+                result_data = self._analyze_with_llm(
+                    file_content=file_content,
+                    document_path=document_path,
+                    prompt=prompt,
+                )
+                
+                # Validate with Pydantic model
+                validated_data = BankStatementData.parse_obj(result_data)
+                result = validated_data.dict()
+            else:
+                # Fallback to legacy method
+                logger.warning("Templates not available, using legacy parsing")
+                result = self._analyze_bank_statement_legacy(file_content, document_path)
             
             # Record success metrics
             processing_time = time.time() - start_time
             self._record_metric("bank_statement", True, processing_time)
             
             logger.info(f"Successfully parsed bank statement in {processing_time:.2f}s")
-            return validated_data.dict()
+            return result
             
         except ValidationError as e:
             processing_time = time.time() - start_time
@@ -143,26 +173,33 @@ class DocumentProcessor:
                 logger.warning("Gemini model not available, using simulated data")
                 return self._get_simulated_salary_data()
             
-            # Generate prompt from template
-            schema = SalaryStatementData.schema_json(indent=2)
-            prompt = PromptTemplates.SALARY_STATEMENT.render(schema=schema)
-            
-            # Analyze with LLM
-            result_data = self._analyze_with_llm(
-                file_content=file_content,
-                document_path=document_path,
-                prompt=prompt,
-            )
-            
-            # Validate with Pydantic model
-            validated_data = SalaryStatementData.parse_obj(result_data)
+            # Check if templates are available
+            if TEMPLATES_AVAILABLE and SalaryStatementData and PromptTemplates:
+                # Generate prompt from template
+                schema = SalaryStatementData.schema_json(indent=2)
+                prompt = PromptTemplates.SALARY_STATEMENT.render(schema=schema)
+                
+                # Analyze with LLM
+                result_data = self._analyze_with_llm(
+                    file_content=file_content,
+                    document_path=document_path,
+                    prompt=prompt,
+                )
+                
+                # Validate with Pydantic model
+                validated_data = SalaryStatementData.parse_obj(result_data)
+                result = validated_data.dict()
+            else:
+                # Fallback to legacy method
+                logger.warning("Templates not available, using legacy parsing")
+                result = self._get_simulated_salary_data()
             
             # Record success metrics
             processing_time = time.time() - start_time
             self._record_metric("salary_statement", True, processing_time)
             
             logger.info(f"Successfully parsed salary statement in {processing_time:.2f}s")
-            return validated_data.dict()
+            return result
             
         except ValidationError as e:
             processing_time = time.time() - start_time

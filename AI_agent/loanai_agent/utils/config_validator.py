@@ -6,7 +6,8 @@ from typing import Dict, List, Optional
 from pydantic import ValidationError
 
 from config.settings import settings
-from loanai_agent.utils import ConfigurationException, get_logger
+from loanai_agent.utils.exceptions import ConfigurationException
+from loanai_agent.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

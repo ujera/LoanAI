@@ -151,7 +151,20 @@ class LoanApplicationProcessor:
                 results[name] = result
                 self.logger.info(f"{name} completed successfully")
 
-        return results
+        # Convert Pydantic models to dicts for compatibility
+        results_dict = {}
+        for name, result in results.items():
+            if hasattr(result, 'dict'):
+                # It's a Pydantic model
+                results_dict[name] = result.dict()
+            elif hasattr(result, 'model_dump'):
+                # Pydantic v2
+                results_dict[name] = result.model_dump()
+            else:
+                # Already a dict
+                results_dict[name] = result
+
+        return results_dict
 
     async def _run_with_timeout(
         self, 
