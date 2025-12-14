@@ -17,8 +17,8 @@ class LoanOfficerAgent(DecisionAgent):
         super().__init__(
             name="loan_officer_agent",
             description="Senior loan officer responsible for final loan decisions",
-            model="gemini-2.0-flash-exp",
-            temperature=0.1,
+            model="gemini-3.0-pro-preview",
+            temperature=0,
         )
 
     async def _perform_analysis(
