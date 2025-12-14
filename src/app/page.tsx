@@ -4,9 +4,15 @@ import { useState } from "react";
 import { LoanForm } from "@/components/feature/LoanForm";
 import { LandingPage } from "@/components/feature/LandingPage";
 import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
   const [hasStarted, setHasStarted] = useState(false);
+  const router = useRouter();
+
+  const handleAdminStart = () => {
+    router.push('/admin');
+  };
 
   return (
     <div className="min-h-screen font-[family-name:var(--font-geist-sans)]">
@@ -18,7 +24,7 @@ export default function Home() {
           hasStarted ? "-translate-y-full opacity-0 pointer-events-none" : "translate-y-0 opacity-100"
         )}
       >
-        <LandingPage onStart={() => setHasStarted(true)} />
+        <LandingPage onStart={() => setHasStarted(true)} onAdminStart={handleAdminStart} />
       </div>
 
       {/* App Layer */}
