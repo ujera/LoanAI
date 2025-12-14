@@ -315,7 +315,7 @@ class LoanOfficerAgent(DecisionAgent):
     def get_system_prompt(self) -> str:
         """Get system prompt for this agent."""
         return """You are a senior loan officer with 20 years of experience in financial analysis 
-and risk assessment. Your role is to review loan applications, analyze sub-agent 
+and risk assessment, Be aware that you work in Georgia and make decisions accordingly. Your role is to review loan applications, analyze sub-agent 
 reports, and make final decisions on loan approvals or rejections.
 
 Key responsibilities:

@@ -280,26 +280,34 @@ class DecisionEngine:
         Returns:
             Formatted explanation
         """
+        # Determine risk level description
+        risk_level = RiskScoringEngine._get_risk_level(risk_score)
+        risk_descriptions = {
+            "low": "excellent financial standing",
+            "moderate_low": "good financial standing with minor concerns",
+            "moderate": "acceptable financial standing with some areas requiring attention",
+            "moderate_high": "concerning financial indicators",
+            "high": "significant financial risks identified"
+        }
+        risk_desc = risk_descriptions.get(risk_level, "")
+        
+        # Create decision summary
+        decision_summaries = {
+            DecisionStatus.APPROVED: f"✓ Application Approved - The applicant demonstrates {risk_desc}. All verification checks have been successfully completed.",
+            DecisionStatus.REJECTED: f"✗ Application Declined - The applicant shows {risk_desc}. The risk assessment indicates this application does not meet our lending criteria at this time.",
+            DecisionStatus.MANUAL_REVIEW: f"⚠ Manual Review Required - The applicant shows {risk_desc}. Additional review by a loan officer is recommended to make a final determination."
+        }
+        
+        decision_summary = decision_summaries.get(decision, "Decision pending further review.")
+        
         explanation_parts = [
-            f"Decision: {decision.value}",
-            f"Risk Assessment: {risk_score}/100",
-            f"\nAnalysis Details:",
-            f"- Financial: {bank_reasoning}",
-            f"- Employment: {salary_reasoning}",
-            f"- Verification: {verification_reasoning}",
+            f"## Decision Summary\n{decision_summary}",
+            f"\n## Risk Assessment",
+            f"Overall Risk Score: {risk_score}/100 ({risk_level.replace('_', ' ').title()})",
+            f"\n## Detailed Analysis",
+            f"\n### Financial Health\n{bank_reasoning}",
+            f"\n### Employment & Income\n{salary_reasoning}",
+            f"\n### Identity Verification\n{verification_reasoning}",
         ]
-
-        if decision == DecisionStatus.APPROVED:
-            explanation_parts.append(
-                "\nConclusion: Application approved. All verification checks passed."
-            )
-        elif decision == DecisionStatus.REJECTED:
-            explanation_parts.append(
-                "\nConclusion: Application rejected due to risk assessment."
-            )
-        else:
-            explanation_parts.append(
-                "\nConclusion: Application requires manual review by loan officer."
-            )
 
         return "\n".join(explanation_parts)

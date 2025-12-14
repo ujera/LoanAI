@@ -482,8 +482,24 @@ export default function AdminPage() {
                           </div>
                         </div>
                         <div>
-                          <p className="text-xs text-slate-400 mb-1">Reasoning:</p>
-                          <p className="text-xs text-slate-300 bg-white/5 p-2 rounded">{aiDecision.reasoning}</p>
+                          <p className="text-xs text-slate-400 mb-2">Reasoning:</p>
+                          <div className="text-xs text-slate-300 bg-white/5 p-3 rounded space-y-3">
+                            {aiDecision.reasoning.split('\n').map((line, idx) => {
+                              // Handle headers
+                              if (line.startsWith('## ')) {
+                                return <h3 key={idx} className="text-sm font-bold text-white mt-3 first:mt-0">{line.replace('## ', '')}</h3>;
+                              }
+                              if (line.startsWith('### ')) {
+                                return <h4 key={idx} className="text-xs font-semibold text-slate-200 mt-2">{line.replace('### ', '')}</h4>;
+                              }
+                              // Handle empty lines
+                              if (line.trim() === '') {
+                                return null;
+                              }
+                              // Regular text
+                              return <p key={idx} className="text-xs leading-relaxed">{line}</p>;
+                            }).filter(Boolean)}
+                          </div>
                         </div>
                         {aiDecision.conditions && aiDecision.conditions.length > 0 && (
                           <div>
