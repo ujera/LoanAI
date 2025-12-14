@@ -1,8 +1,11 @@
 """Main application orchestrator and entry point."""
 
 import asyncio
+from asyncio import TimeoutError
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
+
+from pydantic import BaseModel
 
 from loanai_agent.agents import (
     BankStatementAgent,
@@ -16,18 +19,25 @@ from loanai_agent.models import (
     DocumentType,
     LoanApplication,
 )
+from loanai_agent.models.schemas import (
+    BankStatementAnalysis,
+    SalaryStatementAnalysis,
+    VerificationAnalysis,
+)
 from loanai_agent.protocols import (
     AgentCommunicationHub,
     DecisionEngine,
     RiskScoringEngine,
 )
-from loanai_agent.utils import generate_correlation_id, get_logger
+from loanai_agent.utils import AgentException, generate_correlation_id, get_logger
 
 logger = get_logger(__name__)
 
 
 class LoanApplicationProcessor:
     """Main orchestrator for loan application processing."""
+
+    AGENT_TIMEOUT = 30  # seconds per agent
 
     def __init__(self):
         """Initialize the loan processor with all agents."""
@@ -94,37 +104,126 @@ class LoanApplicationProcessor:
 
     async def _run_parallel_analysis(
         self, application: LoanApplication
-    ) -> Dict[str, Any]:
-        """Run parallel analysis from all sub-agents.
+    ) -> Dict[str, Union[BankStatementAnalysis, SalaryStatementAnalysis, VerificationAnalysis]]:
+        """Run parallel analysis from all sub-agents with proper error handling and timeouts.
         
         Args:
             application: Loan application to analyze
             
         Returns:
-            Dictionary of analysis results
+            Dictionary of analysis results with typed responses
         """
-        self.logger.info("Executing parallel analysis")
+        self.logger.info("Executing parallel analysis with timeouts")
 
-        # Run all analyses concurrently
+        # Create tasks with timeout wrappers
         tasks = {
-            "bank_analysis": asyncio.create_task(self.bank_agent.analyze(application)),
-            "salary_analysis": asyncio.create_task(self.salary_agent.analyze(application)),
-            "verification_analysis": asyncio.create_task(
-                self.verification_agent.analyze(application)
+            "bank_analysis": self._run_with_timeout(
+                self.bank_agent.analyze(application),
+                self.AGENT_TIMEOUT,
+                "BankStatementAgent",
+            ),
+            "salary_analysis": self._run_with_timeout(
+                self.salary_agent.analyze(application),
+                self.AGENT_TIMEOUT,
+                "SalaryStatementAgent",
+            ),
+            "verification_analysis": self._run_with_timeout(
+                self.verification_agent.analyze(application),
+                self.AGENT_TIMEOUT,
+                "VerificationAgent",
             ),
         }
 
+        # Run all tasks in parallel with gather (return_exceptions=True)
+        # This ensures one failure doesn't cancel other tasks
+        results_list = await asyncio.gather(
+            *tasks.values(),
+            return_exceptions=True
+        )
+
+        # Map results back to names and handle exceptions
         results = {}
-        for name, task in tasks.items():
-            try:
-                result = await task
+        for (name, _), result in zip(tasks.items(), results_list):
+            if isinstance(result, Exception):
+                self.logger.error(f"{name} failed with exception: {result}")
+                results[name] = self._create_error_analysis(name, result)
+            else:
                 results[name] = result
                 self.logger.info(f"{name} completed successfully")
-            except Exception as e:
-                self.logger.error(f"{name} failed: {e}")
-                results[name] = {"error": str(e), "risk_score": 100, "confidence_score": 0.0}
 
-        return results
+        # Convert Pydantic models to dicts for compatibility
+        results_dict = {}
+        for name, result in results.items():
+            if hasattr(result, 'dict'):
+                # It's a Pydantic model
+                results_dict[name] = result.dict()
+            elif hasattr(result, 'model_dump'):
+                # Pydantic v2
+                results_dict[name] = result.model_dump()
+            else:
+                # Already a dict
+                results_dict[name] = result
+
+        return results_dict
+
+    async def _run_with_timeout(
+        self, 
+        coro, 
+        timeout: float, 
+        agent_name: str
+    ) -> Union[BaseModel, Exception]:
+        """Run coroutine with timeout.
+        
+        Args:
+            coro: Coroutine to run
+            timeout: Timeout in seconds
+            agent_name: Name of the agent for logging
+            
+        Returns:
+            Result from coroutine or raises exception
+            
+        Raises:
+            AgentException: If timeout or other error occurs
+        """
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout)
+        except TimeoutError:
+            self.logger.error(f"{agent_name} timed out after {timeout}s")
+            raise AgentException(f"{agent_name} timed out after {timeout}s")
+        except Exception as e:
+            self.logger.error(f"{agent_name} failed: {e}", exc_info=True)
+            raise
+
+    def _create_error_analysis(
+        self, 
+        agent_type: str, 
+        error: Exception
+    ) -> Union[BankStatementAnalysis, SalaryStatementAnalysis, VerificationAnalysis]:
+        """Create appropriate typed error response based on agent type.
+        
+        Args:
+            agent_type: Type of agent that failed
+            error: Exception that occurred
+            
+        Returns:
+            Typed analysis object with error information
+        """
+        error_data = {
+            "agent_name": agent_type,
+            "error": str(error),
+            "confidence_score": 0.0,
+            "risk_score": 100,
+            "recommendation": "review",
+            "reasoning": f"Agent failed with error: {str(error)}",
+        }
+        
+        # Return appropriate typed model based on agent type
+        if "bank" in agent_type.lower():
+            return BankStatementAnalysis(**error_data)
+        elif "salary" in agent_type.lower():
+            return SalaryStatementAnalysis(**error_data)
+        else:
+            return VerificationAnalysis(**error_data)
 
     async def _facilitate_deliberation(
         self,

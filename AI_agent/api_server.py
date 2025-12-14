@@ -274,10 +274,11 @@ async def _process_application_async(application: LoanApplication):
             application_status[customer_id]["completedAt"] = datetime.utcnow().isoformat()
             application_status[customer_id]["result"] = {
                 "decision": result.decision,
-                "riskScore": result.risk_score,
-                "confidenceScore": result.confidence_score,
-                "approvedAmount": result.loan_amount,
-                "interestRate": result.interest_rate,
+                "risk_score": result.risk_score,
+                "confidence_score": result.confidence_score,
+                "loan_amount": result.loan_amount,
+                "interest_rate": result.interest_rate,
+                "loan_duration": result.loan_duration,
                 "conditions": result.conditions,
                 "reasoning": result.reasoning
             }
@@ -466,6 +467,35 @@ async def get_status(customer_id: str):
         )
     
     return application_status[customer_id]
+
+
+@app.get("/api/result/{customer_id}", tags=["Results"])
+async def get_result(customer_id: str):
+    """Get the final result of a loan application.
+    
+    Args:
+        customer_id: Customer ID to get result for
+        
+    Returns:
+        Final decision result if processing is complete
+    """
+    if customer_id not in application_status:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No application found for customer ID: {customer_id}"
+        )
+    
+    status_data = application_status[customer_id]
+    
+    # Check if processing is complete
+    if status_data.get("status") != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Application processing not yet complete. Status: {status_data.get('status')}"
+        )
+    
+    # Return the result
+    return status_data.get("result", {})
 
 
 @app.get("/api/applications", tags=["Status"])

@@ -1,11 +1,12 @@
 """Bank Statement Analysis Agent implementation."""
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from loanai_agent.agents.base_agent import AnalysisAgent
-from loanai_agent.models import BankStatementAnalysis, LoanApplication
-from loanai_agent.tools import DocumentProcessor, FinancialAnalyzer, EmploymentVerifier
-from loanai_agent.utils import get_logger
+from loanai_agent.models import BankStatementAnalysis, DocumentType, LoanApplication
+from loanai_agent.tools import DocumentProcessor, EmploymentVerifier, FinancialAnalyzer
+from loanai_agent.utils import DocumentProcessingException, get_logger
 
 logger = get_logger(__name__)
 
@@ -26,53 +27,125 @@ class BankStatementAgent(AnalysisAgent):
 
     async def _perform_analysis(
         self, application: LoanApplication, **kwargs: Any
-    ) -> Dict[str, Any]:
-        """Perform bank statement analysis.
+    ) -> BankStatementAnalysis:
+        """Perform bank statement analysis with proper error handling.
         
         Args:
             application: Loan application with bank statement
             **kwargs: Additional arguments (e.g., document_path)
             
         Returns:
-            Analysis result
+            BankStatementAnalysis object with complete analysis
         """
         try:
-            # Extract bank statement document
-            bank_doc = next(
-                (
-                    d
-                    for d in application.documents
-                    if d.document_type.value == "bank_statement"
-                ),
-                None,
+            # Extract bank statement document using safe helper
+            bank_doc = self._find_document(
+                application.documents,
+                DocumentType.BANK_STATEMENT
             )
 
             if not bank_doc:
-                self.logger.warning("No bank statement document found")
-                return {
-                    "error": "No bank statement provided",
-                    "confidence_score": 0.0,
-                    "risk_score": 100,
-                }
+                self.logger.warning(
+                    f"No bank statement found for customer {application.customer_id}"
+                )
+                return BankStatementAnalysis(
+                    agent_name=self.name,
+                    error="No bank statement provided",
+                    confidence_score=0.0,
+                    risk_score=100,
+                    recommendation="reject",
+                    reasoning="Cannot process application without bank statement",
+                    document_authenticity="missing",
+                    average_monthly_balance=0.0,
+                    average_monthly_income=0.0,
+                    income_consistency="unknown",
+                    total_monthly_expenses=0.0,
+                    recurring_obligations=0.0,
+                    red_flags=["No bank statement provided"],
+                    savings_behavior="unknown",
+                )
 
-            # Extract text from document
-            extracted_text = self.document_processor.extract_text_from_document(
-                bank_doc.file_path
-            )
-
-            # Parse extracted text
-            parsed_data = self.document_processor.parse_bank_statement(extracted_text)
+            # Parse document with retry logic
+            parsed_data = await self._parse_with_retry(bank_doc.file_path)
 
             # Perform analysis
             analysis = await self._analyze_bank_data(
                 parsed_data, application.employment.monthly_salary
             )
 
-            return analysis
+            # Return typed BankStatementAnalysis model
+            return BankStatementAnalysis(**analysis)
 
+        except DocumentProcessingException as e:
+            self.logger.error(f"Document processing failed: {e}", exc_info=True)
+            return BankStatementAnalysis(
+                agent_name=self.name,
+                error=str(e),
+                confidence_score=0.0,
+                risk_score=100,
+                recommendation="review",
+                reasoning=f"Document processing error: {str(e)}",
+                document_authenticity="unverified",
+                average_monthly_balance=0.0,
+                average_monthly_income=0.0,
+                income_consistency="unknown",
+                total_monthly_expenses=0.0,
+                recurring_obligations=0.0,
+                red_flags=["Document processing failed"],
+                savings_behavior="unknown",
+            )
         except Exception as e:
-            self.logger.error(f"Bank statement analysis failed: {e}")
+            self.logger.error(f"Unexpected error in analysis: {e}", exc_info=True)
+            # Re-raise unexpected errors
             raise
+
+    def _find_document(
+        self, documents: List, doc_type: DocumentType
+    ) -> Optional[Any]:
+        """Safely find document by type.
+        
+        Args:
+            documents: List of documents
+            doc_type: Document type to find
+            
+        Returns:
+            Document if found, None otherwise
+        """
+        return next(
+            (d for d in documents if d.document_type == doc_type),
+            None,
+        )
+
+    async def _parse_with_retry(
+        self, file_path: str, max_retries: int = 3
+    ) -> Dict[str, Any]:
+        """Parse document with retry logic and exponential backoff.
+        
+        Args:
+            file_path: Path to document file
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            Parsed document data
+            
+        Raises:
+            DocumentProcessingException: If parsing fails after all retries
+        """
+        for attempt in range(max_retries):
+            try:
+                return self.document_processor.parse_bank_statement(file_path)
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise DocumentProcessingException(
+                        f"Failed to parse document after {max_retries} attempts: {str(e)}"
+                    ) from e
+                
+                # Exponential backoff: 1s, 2s, 4s
+                wait_time = 2 ** attempt
+                self.logger.warning(
+                    f"Parse attempt {attempt + 1} failed, retrying in {wait_time}s: {e}"
+                )
+                await asyncio.sleep(wait_time)
 
     async def _analyze_bank_data(
         self, bank_data: Dict[str, Any], reported_salary: Optional[float] = None
@@ -102,9 +175,10 @@ class BankStatementAgent(AnalysisAgent):
             if t.get("type") == "debit"
         )
 
-        avg_balance = (
-            bank_data.get("opening_balance", 0) + bank_data.get("closing_balance", 0)
-        ) / 2
+        # Handle None values for balances
+        opening_balance = bank_data.get("opening_balance") or 0
+        closing_balance = bank_data.get("closing_balance") or 0
+        avg_balance = (opening_balance + closing_balance) / 2
 
         # Analyze income consistency
         income_consistency_score = self.financial_analyzer.calculate_income_consistency(

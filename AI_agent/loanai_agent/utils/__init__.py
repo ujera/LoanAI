@@ -1,5 +1,10 @@
 """Utilities package initialization."""
 
+from loanai_agent.utils.config_validator import (
+    ConfigurationValidator,
+    get_validation_report,
+    validate_configuration,
+)
 from loanai_agent.utils.exceptions import (
     AgentException,
     CommunicationException,
