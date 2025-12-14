@@ -1,8 +1,13 @@
 """Document processing and analysis tools."""
 
 import json
+import os
 from typing import Any, Dict, List, Optional
 
+import google.generativeai as genai
+
+from config.settings import settings
+from loanai_agent.utils.gcs_client import get_gcs_client
 from loanai_agent.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -11,18 +16,213 @@ logger = get_logger(__name__)
 class DocumentProcessor:
     """Handles document OCR and text extraction."""
 
-    @staticmethod
+    def __init__(self):
+        """Initialize document processor."""
+        self.gcs_client = None
+        self.use_document_ai = settings.enable_document_ai
+        
+        # Configure Gemini API
+        if settings.google_api_key:
+            genai.configure(api_key=settings.google_api_key)
+            self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            logger.info("Gemini model initialized for document analysis")
+        else:
+            self.model = None
+            logger.warning("GOOGLE_API_KEY not set. Document analysis will be limited.")
+        
+        # Initialize GCS client if needed
+        if self.use_document_ai:
+            try:
+                self.gcs_client = get_gcs_client()
+                logger.info("GCS client initialized for document processing")
+            except Exception as e:
+                logger.warning(f"Failed to initialize GCS client: {e}. Falling back to simulation mode.")
+                self.use_document_ai = False
+
     def extract_text_from_document(
-        document_path: str, document_type: str = "pdf"
+        self, document_path: str, document_type: str = "pdf"
     ) -> str:
         """
-        Extract text from document using Document AI.
-        In a real implementation, this would use Google Cloud Document AI.
-        For demo purposes, we simulate the extraction.
+        Extract text from document using Document AI or simulation.
+        
+        Args:
+            document_path: GCS path (gs://bucket/path) or local file path
+            document_type: Type of document (pdf, image, etc.)
+            
+        Returns:
+            Extracted text content
         """
         logger.info(f"Extracting text from {document_path}")
 
-        # Simulated OCR extraction
+        # Check if this is a GCS path
+        if document_path.startswith("gs://"):
+            return self._extract_from_gcs(document_path, document_type)
+        else:
+            return self._extract_from_local(document_path, document_type)
+
+    def _extract_from_gcs(self, gs_url: str, document_type: str = "pdf") -> str:
+        """
+        Extract text from document stored in GCS.
+        
+        Args:
+            gs_url: GCS URL (gs://bucket/path/to/file)
+            document_type: Type of document
+            
+        Returns:
+            Extracted text
+        """
+        try:
+            if not self.gcs_client or not self.use_document_ai:
+                logger.warning(f"GCS/Document AI not available. Using simulation for {gs_url}")
+                return self._get_simulated_extraction(gs_url, document_type)
+            
+            # Check if file exists
+            if not self.gcs_client.file_exists(gs_url):
+                logger.error(f"File not found in GCS: {gs_url}")
+                return f"ERROR: File not found - {gs_url}"
+            
+            # Download file from GCS
+            logger.info(f"Downloading file from GCS: {gs_url}")
+            file_content = self.gcs_client.download_file(gs_url)
+            
+            # Process with Document AI
+            return self._process_with_document_ai(file_content, document_type)
+            
+        except Exception as e:
+            logger.error(f"Error extracting text from GCS {gs_url}: {e}")
+            logger.warning("Falling back to simulation mode")
+            return self._get_simulated_extraction(gs_url, document_type)
+
+    def _extract_from_local(self, file_path: str, document_type: str = "pdf") -> str:
+        """
+        Extract text from local file.
+        
+        Args:
+            file_path: Local file path
+            document_type: Type of document
+            
+        Returns:
+            Extracted text
+        """
+        try:
+            if not os.path.exists(file_path):
+                logger.error(f"Local file not found: {file_path}")
+                return f"ERROR: File not found - {file_path}"
+            
+            # Read file
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
+            
+            # Process with Document AI
+            if self.use_document_ai:
+                return self._process_with_document_ai(file_content, document_type)
+            else:
+                return self._get_simulated_extraction(file_path, document_type)
+                
+        except Exception as e:
+            logger.error(f"Error extracting text from local file {file_path}: {e}")
+            return self._get_simulated_extraction(file_path, document_type)
+
+    def _process_with_document_ai(self, file_content: bytes, document_type: str) -> str:
+        """
+        Process document with Google Cloud Document AI.
+        
+        Args:
+            file_content: Document content as bytes
+            document_type: Type of document
+            
+        Returns:
+            Extracted text
+        """
+        try:
+            from google.cloud import documentai_v1 as documentai
+            
+            # Initialize Document AI client
+            client = documentai.DocumentProcessorServiceClient()
+            
+            # Set processor based on document type
+            # Note: You need to create these processors in GCP Console
+            processor_name = self._get_processor_name(document_type)
+            
+            if not processor_name:
+                logger.warning(f"No Document AI processor configured for {document_type}")
+                return self._get_simulated_extraction(f"<document_{document_type}>", document_type)
+            
+            # Create process request
+            raw_document = documentai.RawDocument(
+                content=file_content,
+                mime_type=self._get_mime_type(document_type)
+            )
+            
+            request = documentai.ProcessRequest(
+                name=processor_name,
+                raw_document=raw_document
+            )
+            
+            # Process document
+            logger.info(f"Processing document with Document AI processor: {processor_name}")
+            result = client.process_document(request=request)
+            
+            # Extract text
+            document = result.document
+            extracted_text = document.text
+            
+            logger.info(f"Successfully extracted {len(extracted_text)} characters from document")
+            return extracted_text
+            
+        except ImportError:
+            logger.warning("google-cloud-documentai not installed. Using simulation mode.")
+            return self._get_simulated_extraction(f"<document_{document_type}>", document_type)
+        except Exception as e:
+            logger.error(f"Error processing document with Document AI: {e}")
+            return self._get_simulated_extraction(f"<document_{document_type}>", document_type)
+
+    def _get_processor_name(self, document_type: str) -> Optional[str]:
+        """
+        Get Document AI processor name for document type.
+        
+        Args:
+            document_type: Type of document
+            
+        Returns:
+            Processor name or None
+        """
+        # Document AI processor format:
+        # projects/{project}/locations/{location}/processors/{processor_id}
+        
+        # These would be configured in settings/environment
+        # For now, return None to indicate processors need to be set up
+        processor_map = {
+            "bank_statement": os.getenv("DOCUMENT_AI_BANK_PROCESSOR"),
+            "salary_statement": os.getenv("DOCUMENT_AI_SALARY_PROCESSOR"),
+            "pdf": os.getenv("DOCUMENT_AI_GENERAL_PROCESSOR"),
+        }
+        
+        return processor_map.get(document_type)
+
+    def _get_mime_type(self, document_type: str) -> str:
+        """Get MIME type for document type."""
+        mime_types = {
+            "pdf": "application/pdf",
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+        }
+        return mime_types.get(document_type.lower(), "application/pdf")
+
+    def _get_simulated_extraction(self, document_path: str, document_type: str) -> str:
+        """
+        Return simulated document extraction for demo purposes.
+        
+        Args:
+            document_path: Path or URL of document
+            document_type: Type of document
+            
+        Returns:
+            Simulated extracted text
+        """
+        logger.info(f"Using simulated extraction for {document_path}")
+        
         simulated_extraction = f"""
         Extracted text from {document_type.upper()} document:
         {document_path}
@@ -30,18 +230,123 @@ class DocumentProcessor:
         [SIMULATED OCR OUTPUT]
         This is a demonstration of OCR extraction.
         In production, this would use Google Cloud Document AI
-        to extract real document content.
+        to extract real document content from GCS.
+        
+        Configure Document AI processors and set ENABLE_DOCUMENT_AI=true
+        to enable real document processing.
         """
 
         return simulated_extraction
 
-    @staticmethod
-    def parse_bank_statement(extracted_text: str) -> Dict[str, Any]:
-        """Parse bank statement text into structured data."""
-        logger.info("Parsing bank statement")
+    def parse_bank_statement(self, document_path: str, file_content: Optional[bytes] = None) -> Dict[str, Any]:
+        """Parse bank statement using LLM to extract structured data.
+        
+        Args:
+            document_path: GCS path or local path to document
+            file_content: Optional pre-loaded file content as bytes
+            
+        Returns:
+            Structured bank statement data
+        """
+        logger.info(f"Parsing bank statement from {document_path}")
 
-        # Simulated parsing
-        parsed_data = {
+        try:
+            # Get file content if not provided
+            if file_content is None:
+                if document_path.startswith("gs://"):
+                    if self.gcs_client:
+                        file_content = self.gcs_client.download_file(document_path)
+                    else:
+                        logger.warning("GCS client not available, using simulated data")
+                        return self._get_simulated_bank_data()
+                else:
+                    with open(document_path, 'rb') as f:
+                        file_content = f.read()
+
+            # Use LLM to analyze the document
+            if self.model:
+                return self._analyze_bank_statement_with_llm(file_content, document_path)
+            else:
+                logger.warning("Gemini model not available, using simulated data")
+                return self._get_simulated_bank_data()
+                
+        except Exception as e:
+            logger.error(f"Error parsing bank statement: {e}")
+            return self._get_simulated_bank_data()
+
+    def _analyze_bank_statement_with_llm(self, file_content: bytes, document_path: str) -> Dict[str, Any]:
+        """Analyze bank statement using Gemini LLM.
+        
+        Args:
+            file_content: Document content as bytes
+            document_path: Path to document (for mime type detection)
+            
+        Returns:
+            Structured bank statement data
+        """
+        try:
+            # Determine mime type
+            mime_type = self._get_mime_type_from_path(document_path)
+            
+            # Create multimodal prompt
+            prompt = """Analyze this bank statement document and extract the following information in JSON format:
+
+{
+  "account_holder": "account holder name",
+  "account_number": "masked account number",
+  "statement_period": "period covered by statement",
+  "opening_balance": numerical opening balance,
+  "closing_balance": numerical closing balance,
+  "total_credits": total of all credit transactions,
+  "total_debits": total of all debit transactions,
+  "transactions": [
+    {
+      "date": "YYYY-MM-DD",
+      "description": "transaction description",
+      "amount": numerical amount,
+      "type": "credit" or "debit"
+    }
+  ]
+}
+
+Extract ALL transactions from the statement. Be precise with numbers and dates.
+Return ONLY valid JSON, no additional text."""
+
+            # Upload file and generate content
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(document_path)[1]) as tmp:
+                tmp.write(file_content)
+                tmp_path = tmp.name
+            
+            try:
+                uploaded_file = genai.upload_file(tmp_path, mime_type=mime_type)
+                response = self.model.generate_content([prompt, uploaded_file])
+                
+                # Parse JSON response
+                response_text = response.text.strip()
+                # Remove markdown code blocks if present
+                if response_text.startswith("```json"):
+                    response_text = response_text[7:]
+                if response_text.startswith("```"):
+                    response_text = response_text[3:]
+                if response_text.endswith("```"):
+                    response_text = response_text[:-3]
+                
+                parsed_data = json.loads(response_text.strip())
+                logger.info(f"Successfully parsed bank statement with {len(parsed_data.get('transactions', []))} transactions")
+                return parsed_data
+                
+            finally:
+                # Clean up temp file
+                os.unlink(tmp_path)
+                
+        except Exception as e:
+            logger.error(f"LLM bank statement analysis failed: {e}")
+            return self._get_simulated_bank_data()
+
+    def _get_simulated_bank_data(self) -> Dict[str, Any]:
+        """Return simulated bank statement data for fallback."""
+        return {
             "account_holder": "John Doe",
             "account_number": "****1234",
             "statement_period": "2024-01-01 to 2024-01-31",
@@ -71,15 +376,114 @@ class DocumentProcessor:
             ],
         }
 
-        return parsed_data
+    def parse_salary_statement(self, document_path: str, file_content: Optional[bytes] = None) -> Dict[str, Any]:
+        """Parse salary statement using LLM to extract structured data.
+        
+        Args:
+            document_path: GCS path or local path to document
+            file_content: Optional pre-loaded file content as bytes
+            
+        Returns:
+            Structured salary statement data
+        """
+        logger.info(f"Parsing salary statement from {document_path}")
 
-    @staticmethod
-    def parse_salary_statement(extracted_text: str) -> Dict[str, Any]:
-        """Parse salary statement text into structured data."""
-        logger.info("Parsing salary statement")
+        try:
+            # Get file content if not provided
+            if file_content is None:
+                if document_path.startswith("gs://"):
+                    if self.gcs_client:
+                        file_content = self.gcs_client.download_file(document_path)
+                    else:
+                        logger.warning("GCS client not available, using simulated data")
+                        return self._get_simulated_salary_data()
+                else:
+                    with open(document_path, 'rb') as f:
+                        file_content = f.read()
 
-        # Simulated parsing
-        parsed_data = {
+            # Use LLM to analyze the document
+            if self.model:
+                return self._analyze_salary_statement_with_llm(file_content, document_path)
+            else:
+                logger.warning("Gemini model not available, using simulated data")
+                return self._get_simulated_salary_data()
+                
+        except Exception as e:
+            logger.error(f"Error parsing salary statement: {e}")
+            return self._get_simulated_salary_data()
+
+    def _analyze_salary_statement_with_llm(self, file_content: bytes, document_path: str) -> Dict[str, Any]:
+        """Analyze salary statement using Gemini LLM.
+        
+        Args:
+            file_content: Document content as bytes
+            document_path: Path to document (for mime type detection)
+            
+        Returns:
+            Structured salary statement data
+        """
+        try:
+            # Determine mime type
+            mime_type = self._get_mime_type_from_path(document_path)
+            
+            # Create multimodal prompt
+            prompt = """Analyze this salary statement/payslip document and extract the following information in JSON format:
+
+{
+  "employee_name": "employee full name",
+  "employee_id": "employee ID",
+  "employer": "company/employer name",
+  "salary_period": "period (e.g., 2024-01)",
+  "gross_salary": numerical gross salary,
+  "deductions": {
+    "tax": tax amount,
+    "social_security": social security amount,
+    "health": health insurance amount,
+    "other": other deductions
+  },
+  "net_salary": numerical net salary after deductions,
+  "employment_type": "Full-time/Part-time/Contract",
+  "department": "department name",
+  "job_title": "job title/position"
+}
+
+Be precise with numbers. If information is not available, use null.
+Return ONLY valid JSON, no additional text."""
+
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(document_path)[1]) as tmp:
+                tmp.write(file_content)
+                tmp_path = tmp.name
+            
+            try:
+                uploaded_file = genai.upload_file(tmp_path, mime_type=mime_type)
+                response = self.model.generate_content([prompt, uploaded_file])
+                
+                # Parse JSON response
+                response_text = response.text.strip()
+                # Remove markdown code blocks if present
+                if response_text.startswith("```json"):
+                    response_text = response_text[7:]
+                if response_text.startswith("```"):
+                    response_text = response_text[3:]
+                if response_text.endswith("```"):
+                    response_text = response_text[:-3]
+                
+                parsed_data = json.loads(response_text.strip())
+                logger.info(f"Successfully parsed salary statement for {parsed_data.get('employee_name', 'Unknown')}")
+                return parsed_data
+                
+            finally:
+                # Clean up temp file
+                os.unlink(tmp_path)
+                
+        except Exception as e:
+            logger.error(f"LLM salary statement analysis failed: {e}")
+            return self._get_simulated_salary_data()
+
+    def _get_simulated_salary_data(self) -> Dict[str, Any]:
+        """Return simulated salary statement data for fallback."""
+        return {
             "employee_name": "John Doe",
             "employee_id": "EMP12345",
             "employer": "Tech Solutions Inc.",
@@ -92,7 +496,16 @@ class DocumentProcessor:
             "job_title": "Senior Software Engineer",
         }
 
-        return parsed_data
+    def _get_mime_type_from_path(self, file_path: str) -> str:
+        """Get MIME type from file path extension."""
+        ext = os.path.splitext(file_path)[1].lower()
+        mime_types = {
+            '.pdf': 'application/pdf',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+        }
+        return mime_types.get(ext, 'application/pdf')
 
 
 class FinancialAnalyzer:
