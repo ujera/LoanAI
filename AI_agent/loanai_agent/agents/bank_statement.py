@@ -55,13 +55,8 @@ class BankStatementAgent(AnalysisAgent):
                     "risk_score": 100,
                 }
 
-            # Extract text from document
-            extracted_text = self.document_processor.extract_text_from_document(
-                bank_doc.file_path
-            )
-
-            # Parse extracted text
-            parsed_data = self.document_processor.parse_bank_statement(extracted_text)
+            # Parse document directly with LLM (no need for intermediate text extraction)
+            parsed_data = self.document_processor.parse_bank_statement(bank_doc.file_path)
 
             # Perform analysis
             analysis = await self._analyze_bank_data(

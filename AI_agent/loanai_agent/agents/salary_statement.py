@@ -55,15 +55,8 @@ class SalaryStatementAgent(AnalysisAgent):
                     "risk_score": 100,
                 }
 
-            # Extract text from document
-            extracted_text = self.document_processor.extract_text_from_document(
-                salary_doc.file_path
-            )
-
-            # Parse extracted text
-            parsed_data = self.document_processor.parse_salary_statement(
-                extracted_text
-            )
+            # Parse document directly with LLM (no need for intermediate text extraction)
+            parsed_data = self.document_processor.parse_salary_statement(salary_doc.file_path)
 
             # Perform analysis
             analysis = await self._analyze_salary_data(
